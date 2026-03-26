@@ -18,10 +18,13 @@ from goldeneye.viewmodels.chart_vm import ChartViewModel
 from goldeneye.viewmodels.main_vm import MainViewModel
 from goldeneye.viewmodels.orders_vm import OrdersViewModel
 from goldeneye.viewmodels.portfolio_vm import PortfolioViewModel
+from goldeneye.viewmodels.top100_vm import Top100ViewModel
 from goldeneye.views.panels.backtest_panel import BacktestPanel
 from goldeneye.views.panels.chart_panel import ChartPanel
+from goldeneye.views.panels.multi_chart_panel import MultiChartWindow
 from goldeneye.views.panels.order_panel import OrderPanel
 from goldeneye.views.panels.portfolio_panel import PortfolioPanel
+from goldeneye.views.panels.top100_panel import Top100Panel
 from goldeneye.views.panels.watchlist_panel import WatchlistPanel
 
 
@@ -37,12 +40,21 @@ class MainWindow(QMainWindow):
         self._portfolio_vm = PortfolioViewModel(self._main_vm.broker, self)
         self._orders_vm = OrdersViewModel(self._main_vm.broker, self)
         self._backtest_vm = BacktestViewModel(self)
+        self._top100_vm = Top100ViewModel(self)
 
         # Central widget: chart
         chart_panel = ChartPanel(self._chart_vm, self)
         self.setCentralWidget(chart_panel)
 
+        # Multi-symbol chart (floating window, created once, shown on demand)
+        self._multi_chart = MultiChartWindow(self._top100_vm, self)
+
+        # Top 100 panel
+        top100_panel = Top100Panel(self._top100_vm, self)
+        top100_panel.chart_requested.connect(self._multi_chart.request)
+
         # Dockable panels
+        self._add_dock("Top 100 Stocks", top100_panel, Qt.DockWidgetArea.LeftDockWidgetArea)
         self._add_dock("Watchlist", WatchlistPanel(self._main_vm, self), Qt.DockWidgetArea.LeftDockWidgetArea)
         self._add_dock("Portfolio", PortfolioPanel(self._portfolio_vm, self), Qt.DockWidgetArea.RightDockWidgetArea)
         self._add_dock("Orders", OrderPanel(self._orders_vm, self), Qt.DockWidgetArea.BottomDockWidgetArea)

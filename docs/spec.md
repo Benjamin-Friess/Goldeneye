@@ -16,6 +16,7 @@ and uses PyQt6 for its graphical interface.
 - Portfolio and position tracker (equity, unrealized P&L)
 - Order management: market, limit, and stop orders (via Alpaca REST)
 - Event-driven backtesting engine for custom strategies
+- **Top 100 stocks panel** with multi-select and price-evolution chart (1D → 1Y)
 - Dockable, floatable, re-arrangeable panels (persisted across sessions)
 - Pluggable broker interface (swap Alpaca for IBKR, etc.)
 
@@ -70,7 +71,7 @@ Because Qt queues cross-thread signal deliveries, the bus is thread-safe.
 | `goldeneye.core` | Config, logging, event bus, exceptions |
 | `goldeneye.models` | Domain data classes (immutable where possible) |
 | `goldeneye.services.broker` | Abstract `BrokerBase` + `AlpacaBroker` adapter |
-| `goldeneye.services.data` | `DataFeed` (WebSocket) + `HistoricalDataLoader` (REST) |
+| `goldeneye.services.data` | `DataFeed` (WebSocket) + `HistoricalDataLoader` (REST) + `SP100` symbol list |
 | `goldeneye.services.backtest` | `BacktestEngine` + `BacktestResult` |
 | `goldeneye.viewmodels` | Qt-aware state for each panel |
 | `goldeneye.views` | `MainWindow`, dockable panels, custom widgets |
@@ -83,11 +84,12 @@ Because Qt queues cross-thread signal deliveries, the bus is thread-safe.
 ┌─────────────────────────────────────────────────────────┐
 │  Menu bar                                               │
 ├──────────┬──────────────────────────────┬───────────────┤
-│          │                              │  Portfolio    │
-│Watchlist │    Chart  (central widget)   │  (dock)       │
+│Top 100   │                              │  Portfolio    │
+│Stocks    │    Chart  (central widget)   │  (dock)       │
 │ (dock)   │                              ├───────────────┤
-│          │                              │  Backtest     │
-│          │                              │  (dock)       │
+├──────────┤                              │  Backtest     │
+│Watchlist │                              │  (dock)       │
+│ (dock)   │                              │               │
 ├──────────┴──────────────────────────────┴───────────────┤
 │  Orders  (bottom dock)                                  │
 ├─────────────────────────────────────────────────────────┤
@@ -95,7 +97,22 @@ Because Qt queues cross-thread signal deliveries, the bus is thread-safe.
 └─────────────────────────────────────────────────────────┘
 ```
 
-All docks are:
+Selecting symbols in the Top 100 panel and clicking **Show Chart** opens a
+separate floating `MultiChartWindow` with a normalised % change plot.
+
+### Top 100 Stocks Panel
+
+- Searchable / filterable table of 100 S&P 100 constituents (symbol + company name)
+- Multi-select (Ctrl+click / Shift+click) for up to 10 symbols
+- Time-range selector: **1D** (5-min bars) · **5D** (1-h bars) · **1M / 3M / 6M / 1Y** (daily bars)
+- "Show Chart" button opens / updates the floating `MultiChartWindow`
+
+### Multi-Symbol Chart Window
+
+- Floating `QDialog` (independent window, stays on top)
+- Lines normalised to **% change from period start** so all symbols can be compared on one scale
+- Up to 10 coloured lines with auto-legend
+- Fetches data in a background thread (non-blocking UI)
 - **Movable** – drag title bar to re-position
 - **Floatable** – double-click or drag out to become a standalone window
 - **Closable** – re-open from View menu
