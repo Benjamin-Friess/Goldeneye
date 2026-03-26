@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import (
 
 from goldeneye.viewmodels.top100_vm import TIME_RANGES, Top100ViewModel
 
-_HEADERS = ["Symbol", "Company", "Spread ($)"]
+_HEADERS = ["Symbol", "Company", "Spread ($)", "Accum. Gain % (1M)"]
 _RANGE_KEYS = list(TIME_RANGES.keys())
 
 
@@ -37,8 +37,9 @@ class Top100Panel(QWidget):
         super().__init__(parent)
         self._vm = vm
         self._current_range = "1M"
-        # Cache of symbol → spread so filter rebuilds can re-apply values
+        # Cache of symbol → spread / momentum so filter rebuilds can re-apply values
         self._spread_cache: dict[str, float] = {}
+        self._momentum_cache: dict[str, float] = {}
 
         # ── Search bar ────────────────────────────────────────────────
         self._search = QLineEdit(self)
@@ -51,6 +52,7 @@ class Top100Panel(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -60,6 +62,14 @@ class Top100Panel(QWidget):
         # ── Refresh spreads button ────────────────────────────────────
         self._refresh_btn = QPushButton("↻ Refresh Spreads", self)
         self._refresh_btn.clicked.connect(self._refresh_spreads)
+
+        # ── Refresh momentum button ───────────────────────────────────
+        self._momentum_btn = QPushButton("↻ Refresh Momentum", self)
+        self._momentum_btn.clicked.connect(self._refresh_momentum)
+
+        refresh_row = QHBoxLayout()
+        refresh_row.addWidget(self._refresh_btn)
+        refresh_row.addWidget(self._momentum_btn)
 
         # ── Time-range buttons ────────────────────────────────────────
         self._range_btns: dict[str, QPushButton] = {}
@@ -85,12 +95,13 @@ class Top100Panel(QWidget):
         self._vm.loading.connect(lambda on: self._status.setText("Loading data…" if on else ""))
         self._vm.error_occurred.connect(self._status.setText)
         self._vm.spreads_ready.connect(self._on_spreads_ready)
+        self._vm.momentum_ready.connect(self._on_momentum_ready)
 
         # ── Layout ────────────────────────────────────────────────────
         layout = QVBoxLayout(self)
         layout.addWidget(self._search)
         layout.addWidget(self._table)
-        layout.addWidget(self._refresh_btn)
+        layout.addLayout(refresh_row)
         layout.addLayout(range_row)
         layout.addWidget(self._show_btn)
         layout.addWidget(self._status)
@@ -105,6 +116,11 @@ class Top100Panel(QWidget):
             (sym, name) for sym, name in self._vm.symbols
             if ft in sym.lower() or ft in name.lower()
         ]
+        # Sort by descending momentum; symbols with no data go to the bottom
+        rows.sort(
+            key=lambda x: self._momentum_cache.get(x[0], float("-inf")),
+            reverse=True,
+        )
         self._table.setRowCount(len(rows))
         for r, (sym, name) in enumerate(rows):
             sym_item = QTableWidgetItem(sym)
@@ -112,13 +128,21 @@ class Top100Panel(QWidget):
             self._table.setItem(r, 0, sym_item)
             self._table.setItem(r, 1, QTableWidgetItem(name))
 
-            # Spread column — fill from cache if available
+            # Spread column
             spread_val = self._spread_cache.get(sym)
             spread_item = QTableWidgetItem(
                 f"{spread_val:.4f}" if spread_val is not None and not math.isnan(spread_val) else "—"
             )
             spread_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self._table.setItem(r, 2, spread_item)
+
+            # Momentum column
+            mom_val = self._momentum_cache.get(sym)
+            mom_item = QTableWidgetItem(
+                f"{mom_val:.2f} %" if mom_val is not None and not math.isnan(mom_val) else "—"
+            )
+            mom_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._table.setItem(r, 3, mom_item)
 
     def _apply_filter(self, text: str) -> None:
         self._populate(text)
@@ -132,6 +156,11 @@ class Top100Panel(QWidget):
         self._refresh_btn.setEnabled(False)
         self._status.setText("Fetching spreads…")
         self._vm.refresh_spreads()
+
+    def _refresh_momentum(self) -> None:
+        self._momentum_btn.setEnabled(False)
+        self._status.setText("Fetching momentum (this may take a few seconds)…")
+        self._vm.refresh_momentum()
 
     @pyqtSlot(dict)
     def _on_spreads_ready(self, spreads: dict) -> None:
@@ -150,6 +179,14 @@ class Top100Panel(QWidget):
             )
             spread_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self._table.setItem(r, 2, spread_item)
+
+    @pyqtSlot(dict)
+    def _on_momentum_ready(self, momentum: dict) -> None:
+        self._momentum_cache.update(momentum)
+        self._momentum_btn.setEnabled(True)
+        self._status.setText("Momentum updated — table sorted by accumulated gain.")
+        # Full repopulate to apply new sort order
+        self._populate(self._search.text())
 
     def _request_chart(self) -> None:
         selected = list({
