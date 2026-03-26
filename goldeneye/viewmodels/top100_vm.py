@@ -94,7 +94,10 @@ class Top100ViewModel(QObject):
             spreads: dict[str, float] = {}
             for sym, quote in response.items():
                 try:
-                    spreads[sym] = float(quote.ask_price) - float(quote.bid_price)
+                    bid = float(quote.bid_price)
+                    ask = float(quote.ask_price)
+                    # Only record spread when both sides are positive and ask > bid
+                    spreads[sym] = (ask - bid) if bid > 0 and ask > bid else float("nan")
                 except Exception:
                     spreads[sym] = float("nan")
 
