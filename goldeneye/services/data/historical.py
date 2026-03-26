@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import pandas as pd
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -19,6 +20,9 @@ class HistoricalDataLoader:
             api_key=settings.alpaca_api_key,
             secret_key=settings.alpaca_secret_key,
         )
+        # Free-tier Alpaca accounts only have access to the IEX feed.
+        # Set ALPACA_FEED=sip in .env if you have a paid subscription.
+        self._feed = DataFeed.SIP if settings.alpaca_feed == "sip" else DataFeed.IEX
 
     def get_bars(
         self,
@@ -34,6 +38,7 @@ class HistoricalDataLoader:
                 timeframe=timeframe,
                 start=start,
                 end=end,
+                feed=self._feed,
             )
             response = self._client.get_stock_bars(request)
             bars_df: pd.DataFrame = response.df

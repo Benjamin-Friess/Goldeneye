@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     alpaca_api_key: str = Field(default="", alias="ALPACA_API_KEY")
     alpaca_secret_key: str = Field(default="", alias="ALPACA_SECRET_KEY")
     alpaca_paper: bool = Field(default=True, alias="ALPACA_PAPER")
+    alpaca_feed: str = Field(default="iex", alias="ALPACA_FEED")  # "iex" (free) or "sip" (paid)
 
     # App
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
