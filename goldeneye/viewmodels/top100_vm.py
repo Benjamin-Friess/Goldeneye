@@ -3,7 +3,6 @@
 import threading
 from datetime import datetime, timedelta, timezone
 
-import numpy as np
 from PyQt6.QtCore import QObject, pyqtSignal
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from loguru import logger
@@ -26,7 +25,8 @@ TIME_RANGES: dict[str, tuple[timedelta, TimeFrame, str]] = {
 class Top100ViewModel(QObject):
     """Manages the SP100 list and asynchronous multi-symbol historical loads."""
 
-    data_ready = pyqtSignal(dict)    # {symbol: list[Bar]}
+    data_ready = pyqtSignal(dict)           # {symbol: list[Bar]}
+    spreads_ready = pyqtSignal(dict)        # {symbol: float}  bid-ask spread in $
     loading = pyqtSignal(bool)
     error_occurred = pyqtSignal(str)
 
@@ -34,6 +34,10 @@ class Top100ViewModel(QObject):
         super().__init__(parent)
         self._loader = HistoricalDataLoader()
         self.symbols: list[tuple[str, str]] = SP100  # (ticker, name)
+
+    # ------------------------------------------------------------------
+    # Chart data
+    # ------------------------------------------------------------------
 
     def load_chart_data(self, symbols: list[str], range_key: str) -> None:
         """Fetch historical bars for *symbols* over the given time range (non-blocking)."""
@@ -61,3 +65,39 @@ class Top100ViewModel(QObject):
             self.data_ready.emit(result)
         else:
             self.error_occurred.emit("No data returned for selected symbols.")
+
+    # ------------------------------------------------------------------
+    # Spread data
+    # ------------------------------------------------------------------
+
+    def refresh_spreads(self) -> None:
+        """Fetch latest bid/ask quotes for all SP100 symbols (non-blocking)."""
+        thread = threading.Thread(target=self._fetch_spreads, daemon=True)
+        thread.start()
+
+    def _fetch_spreads(self) -> None:
+        try:
+            from alpaca.data.enums import DataFeed
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.requests import StockLatestQuoteRequest
+            from goldeneye.core.config import settings
+
+            client = StockHistoricalDataClient(
+                api_key=settings.alpaca_api_key,
+                secret_key=settings.alpaca_secret_key,
+            )
+            feed = DataFeed.SIP if settings.alpaca_feed == "sip" else DataFeed.IEX
+            tickers = [sym for sym, _ in self.symbols]
+            request = StockLatestQuoteRequest(symbol_or_symbols=tickers, feed=feed)
+            response = client.get_stock_latest_quote(request)
+
+            spreads: dict[str, float] = {}
+            for sym, quote in response.items():
+                try:
+                    spreads[sym] = float(quote.ask_price) - float(quote.bid_price)
+                except Exception:
+                    spreads[sym] = float("nan")
+
+            self.spreads_ready.emit(spreads)
+        except Exception as exc:
+            logger.warning("Spread fetch failed: {}", exc)

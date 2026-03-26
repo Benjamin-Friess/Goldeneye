@@ -5,7 +5,9 @@ Displays an S&P 100 table with multi-select. On selection + time-range choice,
 emits a signal that opens / updates the MultiChartPanel.
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
+import math
+
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -22,8 +24,8 @@ from PyQt6.QtWidgets import (
 
 from goldeneye.viewmodels.top100_vm import TIME_RANGES, Top100ViewModel
 
-_HEADERS = ["Symbol", "Company"]
-_RANGE_KEYS = list(TIME_RANGES.keys())   # ["1D", "5D", "1M", "3M", "6M", "1Y"]
+_HEADERS = ["Symbol", "Company", "Spread ($)"]
+_RANGE_KEYS = list(TIME_RANGES.keys())
 
 
 class Top100Panel(QWidget):
@@ -35,6 +37,8 @@ class Top100Panel(QWidget):
         super().__init__(parent)
         self._vm = vm
         self._current_range = "1M"
+        # Cache of symbol → spread so filter rebuilds can re-apply values
+        self._spread_cache: dict[str, float] = {}
 
         # ── Search bar ────────────────────────────────────────────────
         self._search = QLineEdit(self)
@@ -45,11 +49,17 @@ class Top100Panel(QWidget):
         self._table = QTableWidget(0, len(_HEADERS), self)
         self._table.setHorizontalHeaderLabels(_HEADERS)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._table.verticalHeader().setVisible(False)
         self._populate()
+
+        # ── Refresh spreads button ────────────────────────────────────
+        self._refresh_btn = QPushButton("↻ Refresh Spreads", self)
+        self._refresh_btn.clicked.connect(self._refresh_spreads)
 
         # ── Time-range buttons ────────────────────────────────────────
         self._range_btns: dict[str, QPushButton] = {}
@@ -74,11 +84,13 @@ class Top100Panel(QWidget):
 
         self._vm.loading.connect(lambda on: self._status.setText("Loading data…" if on else ""))
         self._vm.error_occurred.connect(self._status.setText)
+        self._vm.spreads_ready.connect(self._on_spreads_ready)
 
         # ── Layout ────────────────────────────────────────────────────
         layout = QVBoxLayout(self)
         layout.addWidget(self._search)
         layout.addWidget(self._table)
+        layout.addWidget(self._refresh_btn)
         layout.addLayout(range_row)
         layout.addWidget(self._show_btn)
         layout.addWidget(self._status)
@@ -99,7 +111,14 @@ class Top100Panel(QWidget):
             sym_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(r, 0, sym_item)
             self._table.setItem(r, 1, QTableWidgetItem(name))
-        self._table.resizeColumnToContents(0)
+
+            # Spread column — fill from cache if available
+            spread_val = self._spread_cache.get(sym)
+            spread_item = QTableWidgetItem(
+                f"{spread_val:.4f}" if spread_val is not None and not math.isnan(spread_val) else "—"
+            )
+            spread_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._table.setItem(r, 2, spread_item)
 
     def _apply_filter(self, text: str) -> None:
         self._populate(text)
@@ -108,6 +127,29 @@ class Top100Panel(QWidget):
         self._current_range = key
         for k, btn in self._range_btns.items():
             btn.setChecked(k == key)
+
+    def _refresh_spreads(self) -> None:
+        self._refresh_btn.setEnabled(False)
+        self._status.setText("Fetching spreads…")
+        self._vm.refresh_spreads()
+
+    @pyqtSlot(dict)
+    def _on_spreads_ready(self, spreads: dict) -> None:
+        self._spread_cache.update(spreads)
+        self._refresh_btn.setEnabled(True)
+        self._status.setText("Spreads updated.")
+        # Update visible rows without full repopulate (preserves selection)
+        for r in range(self._table.rowCount()):
+            sym_item = self._table.item(r, 0)
+            if sym_item is None:
+                continue
+            sym = sym_item.text()
+            spread_val = self._spread_cache.get(sym)
+            spread_item = QTableWidgetItem(
+                f"{spread_val:.4f}" if spread_val is not None and not math.isnan(spread_val) else "—"
+            )
+            spread_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._table.setItem(r, 2, spread_item)
 
     def _request_chart(self) -> None:
         selected = list({
